@@ -1,12 +1,12 @@
 # Oh My Sage (智者)
 
-> 米家智能家居 AI Agent - 用自然语言控制你的智能家居
+> 米家自动化极客版 AI Agent - 用自然语言控制你的智能家居
 
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
 [![Vercel AI SDK](https://img.shields.io/badge/Vercel%20AI%20SDK-3-purple)](https://sdk.vercel.ai/)
 
-Oh My Sage 是一个**工具驱动的 AI Agent**，通过自然语言对话帮助你创建和管理小米米家智能家居自动化规则。
+Oh My Sage 是一个**工具驱动的 AI Agent**，通过自然语言对话帮助你创建和管理小米米家自动化极客版规则。
 
 ## ✨ 核心特性
 
