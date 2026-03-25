@@ -11,6 +11,135 @@ import { ModelConfig, getModelConfigFromEnv } from './model';
 import { getSkillByName, formatSkillContent, readSkillFile, getSkillCatalog } from '../skills/loader';
 
 /**
+ * 节点自动布局
+ * 根据节点连接关系进行分层布局，从左到右表示流程方向
+ */
+function layoutNodes(nodes: any[]): void {
+  const NODE_WIDTH = 528;
+  const NODE_HEIGHT = 164;
+  const H_SPACING = 150;  // 水平间距
+  const V_SPACING = 80;   // 垂直间距
+  const START_X = 100;
+  const START_Y = 100;
+
+  // 建立节点索引
+  const nodeMap = new Map<string, any>();
+  for (const node of nodes) {
+    nodeMap.set(node.id, node);
+  }
+
+  // 解析连接，建立邻接表和入度表
+  const children = new Map<string, string[]>();  // 父节点 -> 子节点列表
+  const inDegree = new Map<string, number>();    // 节点入度
+  const parentOf = new Map<string, string>();    // 子节点 -> 父节点（用于确定分支位置）
+
+  for (const node of nodes) {
+    children.set(node.id, []);
+    inDegree.set(node.id, 0);
+  }
+
+  // 解析 outputs 连接
+  for (const node of nodes) {
+    const outputs = node.outputs || {};
+    for (const [, targets] of Object.entries(outputs)) {
+      if (!Array.isArray(targets)) continue;
+      for (const target of targets) {
+        if (typeof target !== 'string') continue;
+        const targetId = target.split('.')[0];
+        if (nodeMap.has(targetId)) {
+          children.get(node.id)!.push(targetId);
+          inDegree.set(targetId, (inDegree.get(targetId) || 0) + 1);
+          parentOf.set(targetId, node.id);
+        }
+      }
+    }
+  }
+
+  // BFS 分层：确定每个节点的层级（x 坐标）
+  const levels = new Map<string, number>();  // 节点 -> 层级
+  const queue: string[] = [];
+
+  // 找到所有根节点（入度为 0）
+  for (const node of nodes) {
+    if (inDegree.get(node.id) === 0) {
+      queue.push(node.id);
+      levels.set(node.id, 0);
+    }
+  }
+
+  // BFS 遍历
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentLevel = levels.get(current)!;
+    for (const child of children.get(current) || []) {
+      const childLevel = levels.get(child);
+      if (childLevel === undefined || childLevel < currentLevel + 1) {
+        levels.set(child, currentLevel + 1);
+      }
+      inDegree.set(child, inDegree.get(child)! - 1);
+      if (inDegree.get(child) === 0) {
+        queue.push(child);
+      }
+    }
+  }
+
+  // 处理未被遍历到的节点（可能有循环引用）
+  for (const node of nodes) {
+    if (!levels.has(node.id)) {
+      levels.set(node.id, 0);
+    }
+  }
+
+  // 按层级分组
+  const levelGroups = new Map<number, string[]>();
+  for (const [nodeId, level] of levels) {
+    if (!levelGroups.has(level)) {
+      levelGroups.set(level, []);
+    }
+    levelGroups.get(level)!.push(nodeId);
+  }
+
+  // 分配 y 坐标：考虑分支结构
+  const positions = new Map<string, { x: number; y: number }>();
+
+  // 对每个层级的节点进行排序，使有共同父节点的节点靠近
+  for (const [level, nodeIds] of levelGroups) {
+    // 按父节点分组排序
+    nodeIds.sort((a, b) => {
+      const parentA = parentOf.get(a);
+      const parentB = parentOf.get(b);
+      if (parentA === parentB) return 0;
+      if (!parentA) return -1;
+      if (!parentB) return 1;
+      return nodeIds.indexOf(parentA) - nodeIds.indexOf(parentB);
+    });
+
+    const x = START_X + level * (NODE_WIDTH + H_SPACING);
+    const totalHeight = nodeIds.length * (NODE_HEIGHT + V_SPACING) - V_SPACING;
+    const startY = START_Y + (levelGroups.get(0)!.length * (NODE_HEIGHT + V_SPACING) - totalHeight) / 2;
+
+    for (let i = 0; i < nodeIds.length; i++) {
+      const y = startY + i * (NODE_HEIGHT + V_SPACING);
+      positions.set(nodeIds[i], { x, y });
+    }
+  }
+
+  // 应用位置到节点
+  for (const node of nodes) {
+    const pos = positions.get(node.id);
+    if (pos) {
+      node.cfg = node.cfg || {};
+      node.cfg.pos = {
+        x: Math.round(pos.x),
+        y: Math.round(pos.y),
+        width: NODE_WIDTH,
+        height: NODE_HEIGHT,
+      };
+    }
+  }
+}
+
+/**
  * 创建工具定义
  * 
  * @param gatewayClient 网关客户端实例
@@ -67,277 +196,122 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
     // ==================== 设备相关工具 ====================
     
     /**
-     * 获取设备列表
+     * 获取设备列表（精简预览）
      */
     'get_devices': tool({
-      description: '获取所有智能家居设备列表，包括设备名称、型号、在线状态等信息',
-      parameters: z.object({
-        refresh: z.boolean().optional().describe('是否强制刷新缓存'),
-      }),
-      execute: async ({ refresh = false }) => {
+      description: '获取设备列表（预览模式，只返回关键字段）。如需设备能力信息，用 get_device',
+      parameters: z.object({}),
+      execute: async () => {
         try {
           const response = await gatewayClient.callApi('getDevList', {}, 10000);
           const devList = response.devList || {};
           const devices = Object.entries(devList).map(([did, device]: [string, any]) => ({
             did,
             name: device.name,
-            model: device.model,
             modelName: device.modelName,
             online: device.online,
-            specV2Access: device.specV2Access,
-            specV3Access: device.specV3Access,
-            pushAvailable: device.pushAvailable,
-            urn: device.urn,
-            roomId: device.roomId,
             roomName: device.roomName,
-            icon: device.icon,
           }));
-          return {
-            success: true,
-            devices,
-            count: devices.length,
-          };
+          return { success: true, devices, count: devices.length };
         } catch (error) {
-          return {
-            success: false,
-            error: `获取设备列表失败: ${error}`,
-          };
+          return { success: false, error: `获取设备列表失败: ${error}` };
         }
       },
     }),
     
     /**
-     * 搜索设备
-     */
-    'search_devices': tool({
-      description: '根据名称、房间或类型搜索设备',
-      parameters: z.object({
-        query: z.string().describe('搜索关键词（设备名称、房间名称）'),
-      }),
-      execute: async ({ query }) => {
-        try {
-          const response = await gatewayClient.callApi('getDevList', {}, 10000);
-          const devList = response.devList || {};
-          const lowerQuery = query.toLowerCase();
-          
-          const matchedDevices = Object.entries(devList)
-            .filter(([did, device]: [string, any]) => {
-              const nameMatch = device.name?.toLowerCase().includes(lowerQuery);
-              const roomMatch = device.roomName?.toLowerCase().includes(lowerQuery);
-              const modelMatch = device.modelName?.toLowerCase().includes(lowerQuery);
-              return nameMatch || roomMatch || modelMatch;
-            })
-            .map(([did, device]: [string, any]) => ({
-              did,
-              name: device.name,
-              model: device.model,
-              modelName: device.modelName,
-              online: device.online,
-              specV2Access: device.specV2Access,
-              specV3Access: device.specV3Access,
-              pushAvailable: device.pushAvailable,
-              urn: device.urn,
-              roomId: device.roomId,
-              roomName: device.roomName,
-              icon: device.icon,
-            }));
-          
-          return {
-            success: true,
-            devices: matchedDevices,
-            count: matchedDevices.length,
-          };
-        } catch (error) {
-          return {
-            success: false,
-            error: `搜索设备失败: ${error}`,
-          };
-        }
-      },
-    }),
-    
-    /**
-     * 获取设备详情
+     * 获取设备详情 + MIOT Spec 能力（支持批量）
+     * 合并原 get_device + get_device_spec
      */
     'get_device': tool({
-      description: '获取指定设备的详细信息',
+      description: '获取设备详情及 MIOT Spec 能力（siid/piid/eiid/aiid）。支持批量：传入多个 did 一次获取',
       parameters: z.object({
-        did: z.string().describe('设备ID'),
+        dids: z.array(z.string()).describe('设备ID数组，如 ["950058664", "2076971215"]'),
       }),
-      execute: async ({ did }) => {
+      execute: async ({ dids }) => {
         try {
           const response = await gatewayClient.callApi('getDevList', {}, 10000);
           const devList = response.devList || {};
-          const device = devList[did];
-          
-          if (!device) {
-            return {
-              success: false,
-              error: `设备不存在: ${did}`,
-            };
-          }
-          
-          return {
-            success: true,
-            device: {
+
+          // 批量获取设备信息
+          const results: any[] = [];
+          for (const did of dids) {
+            const device = devList[did];
+            if (!device) {
+              results.push({ did, error: '设备不存在' });
+              continue;
+            }
+
+            const info: any = {
               did,
               name: device.name,
               model: device.model,
               modelName: device.modelName,
               online: device.online,
-              roomId: device.roomId,
               roomName: device.roomName,
               urn: device.urn,
-              icon: device.icon,
-              specV2Access: device.specV2Access,
-              specV3Access: device.specV3Access,
-              pushAvailable: device.pushAvailable,
-            },
             };
-          } catch (error) {
-            return {
-              success: false,
-              error: `获取设备详情失败: ${error}`,
-            };
-          }
-        },
-      }),
 
-      /**
-       * 获取设备 MIOT Spec 详细能力
-       * 通过 URN 从 miot-spec.org 获取设备的完整服务、属性、事件、动作定义
-       */
-      'get_device_spec': tool({
-        description: '获取设备的 MIOT Spec 详细能力信息，包括所有服务、属性、事件和动作定义。创建规则前需要调用此工具获取设备的 siid/piid/eiid/aiid 等能力信息。',
-        parameters: z.object({
-          urn: z.string().describe('设备 URN，如 urn:miot-spec-v2:device:light:0000A001:xiaomi-btlm2p:2'),
-        }),
-        execute: async ({ urn }) => {
-          try {
-            const url = `https://miot-spec.org/miot-spec-v2/instance?type=${encodeURIComponent(urn)}`;
-            const response = await fetch(url);
-            
-            if (!response.ok) {
-              return {
-                success: false,
-                error: `获取设备 Spec 失败: HTTP ${response.status}`,
-              };
+            // 获取 Spec 能力
+            if (device.urn) {
+              try {
+                const specUrl = `https://miot-spec.org/miot-spec-v2/instance?type=${encodeURIComponent(device.urn)}`;
+                const specRes = await fetch(specUrl);
+                if (specRes.ok) {
+                  const specData = await specRes.json() as any;
+                  const services = specData.services || [];
+
+                  // 提取可触发能力（deviceInput 用）
+                  const triggers: any[] = [];
+                  // 提取可执行能力（deviceOutput 用）
+                  const actions: any[] = [];
+                  // 提取可查询能力（deviceGet 用）
+                  const readable: any[] = [];
+
+                  for (const s of services) {
+                    for (const p of (s.properties || [])) {
+                      const cap = {
+                        siid: s.iid,
+                        piid: p.iid,
+                        desc: `${s.description}-${p.description}`,
+                        dtype: p.format,  // bool/uint8/int32/float 等
+                      };
+                      if (p.access?.includes('notify')) triggers.push({ ...cap, type: 'prop' });
+                      if (p.access?.includes('write')) actions.push({ ...cap, type: 'prop', range: p['value-range'], list: p['value-list'] });
+                      if (p.access?.includes('read')) readable.push(cap);
+                    }
+                    for (const e of (s.events || [])) {
+                      triggers.push({ siid: s.iid, eiid: e.iid, desc: `${s.description}-${e.description}`, type: 'event' });
+                    }
+                    for (const a of (s.actions || [])) {
+                      actions.push({ siid: s.iid, aiid: a.iid, desc: `${s.description}-${a.description}`, type: 'action', in: a.in });
+                    }
+                  }
+
+                  info.triggers = triggers;
+                  info.actions = actions;
+                  info.readable = readable;
+                } else {
+                  info.specError = `HTTP ${specRes.status}`;
+                }
+              } catch (e) {
+                info.specError = String(e);
+              }
             }
-            
-            const data = await response.json() as any;
-            
-            // 解析服务能力
-            const services = (data.services || []).map((service: any) => ({
-              siid: service.iid,
-              type: service.type,
-              description: service.description,
-              properties: (service.properties || []).map((prop: any) => ({
-                piid: prop.iid,
-                type: prop.type,
-                description: prop.description,
-                dtype: prop.format,
-                access: prop.access,
-                valueRange: prop['value-range'],
-                valueList: prop['value-list'],
-              })),
-              events: (service.events || []).map((event: any) => ({
-                eiid: event.iid,
-                type: event.type,
-                description: event.description,
-                arguments: event.arguments,
-              })),
-              actions: (service.actions || []).map((action: any) => ({
-                aiid: action.iid,
-                type: action.type,
-                description: action.description,
-                in: action.in,
-              })),
-            }));
 
-            // 提取可触发能力（用于 deviceInput）
-            const triggers = services.flatMap((s: any) => {
-              const result: any[] = [];
-              // 属性上报（notify）
-              s.properties?.filter((p: any) => p.access?.includes('notify')).forEach((p: any) => {
-                result.push({
-                  type: 'propertyNotify',
-                  siid: s.siid,
-                  piid: p.piid,
-                  description: `${s.description} - ${p.description}`,
-                  dtype: p.dtype,
-                });
-              });
-              // 事件
-              s.events?.forEach((e: any) => {
-                result.push({
-                  type: 'event',
-                  siid: s.siid,
-                  eiid: e.eiid,
-                  description: `${s.description} - ${e.description}`,
-                  arguments: e.arguments,
-                });
-              });
-              return result;
-            });
-
-            // 提取可执行能力（用于 deviceOutput）
-            const actions = services.flatMap((s: any) => {
-              const result: any[] = [];
-              // 属性设置（write）
-              s.properties?.filter((p: any) => p.access?.includes('write')).forEach((p: any) => {
-                result.push({
-                  type: 'propertySet',
-                  siid: s.siid,
-                  piid: p.piid,
-                  description: `${s.description} - ${p.description}`,
-                  dtype: p.dtype,
-                  valueRange: p.valueRange,
-                  valueList: p.valueList,
-                });
-              });
-              // 动作
-              s.actions?.forEach((a: any) => {
-                result.push({
-                  type: 'action',
-                  siid: s.siid,
-                  aiid: a.aiid,
-                  description: `${s.description} - ${a.description}`,
-                  in: a.in,
-                });
-              });
-              return result;
-            });
-
-            // 提取可查询能力（用于 deviceGet）
-            const readable = services.flatMap((s: any) =>
-              (s.properties || [])
-                .filter((p: any) => p.access?.includes('read'))
-                .map((p: any) => ({
-                  siid: s.siid,
-                  piid: p.piid,
-                  description: `${s.description} - ${p.description}`,
-                  dtype: p.dtype,
-                }))
-            );
-
-            return {
-              success: true,
-              urn,
-              description: data.description,
-              services,
-              triggers,
-              actions,
-              readable,
-              message: `设备包含 ${services.length} 个服务，${triggers.length} 个触发能力，${actions.length} 个执行能力`,
-            };
-          } catch (error) {
-            return {
-              success: false,
-              error: `获取设备 Spec 失败: ${error}`,
-            };
+            results.push(info);
           }
-        },
-      }),
+
+          return {
+            success: true,
+            devices: results,
+            count: results.length,
+          };
+        } catch (error) {
+          return { success: false, error: `获取设备信息失败: ${error}` };
+        }
+      },
+    }),
     
     // ==================== 规则相关工具 ====================
     
@@ -419,6 +393,9 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
             },
             props: node.props || {},  // props 必须存在，可以为空对象
           }));
+
+          // 自动布局节点位置
+          layoutNodes(processedNodes);
           
           const graph: any = {
             id: graphId,
@@ -484,6 +461,11 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
             },
             props: node.props || {},  // props 必须存在，可以为空对象
           }));
+
+          // 自动布局节点位置（仅当提供新节点时重新布局）
+          if (nodes) {
+            layoutNodes(processedNodes);
+          }
 
           const graph: any = {
             id,

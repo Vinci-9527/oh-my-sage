@@ -672,6 +672,14 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
 - `start`/`end` 的 `hour`/`minute`/`second` 范围同 `alarmClock`
 - `filter.day`：整数数组，0=周日, 1=周一, ..., 6=周六
 
+**⚠️ timeRange 特殊规则**：
+- `inputs` 必须是空对象 `{}`（不能有 `trigger`）
+- `outputs` 只有 `output`（没有 `output2`）
+- 它是**状态节点**，不是事件驱动节点
+- 正确用法：timeRange.output → condition.condition（作为条件判断）
+- ❌ 错误：`query.output2 → range1.trigger`（timeRange 没有 trigger 输入）
+- ❌ 错误：`range1.output2`（timeRange 只有 output，没有 output2）
+
 ---
 
 ### delay — 延时
@@ -775,6 +783,24 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
 "query1.outputs.output": ["cond1.trigger"]
 // deviceGet 的 output2 也可以连接到 condition.condition
 "query1.outputs.output2": ["cond1.condition"]
+```
+
+**与 timeRange 配合（常见模式）**：
+```
+deviceInput → condition1
+                ├─ met → deviceGet → condition2
+                │                   ├─ met → action1（设备状态满足 + 时间满足）
+                │                   └─ unmet → action2（设备状态满足 + 时间不满足）
+                └─ unmet → action3（触发条件不满足）
+```
+
+⚠️ **timeRange 不能被直接触发**，它是状态节点，只能作为 condition 的条件输入：
+```json
+// 正确：timeRange.output 连接到 condition.condition
+"range1.outputs.output": ["cond2.condition"]
+
+// 错误：timeRange 没有 trigger 输入
+"query1.outputs.output2": ["range1.trigger"]  // ❌
 ```
 
 ---
