@@ -30,7 +30,7 @@ export type AgentOutput =
  */
 export class Agent {
     /** 上下文压缩阈值（token 估算值），超过此值触发压缩 */
-    private static readonly MAX_CONTEXT_TOKENS = 60000;
+    private static readonly MAX_CONTEXT_TOKENS = 200000;
     /** 压缩时保留的最近消息轮数（这些消息不参与压缩，直接保留） */
     private static readonly KEEP_RECENT_TURNS = 3;
 
@@ -163,7 +163,7 @@ export class Agent {
     private estimateTokens(): number {
         let totalChars = 0;
         // system prompt
-        totalChars += this.systemPrompt.length;
+        totalChars += (this.systemPrompt || '').length;
 
         for (const msg of this.messages) {
             if (typeof msg.content === 'string') {
@@ -171,11 +171,11 @@ export class Agent {
             } else if (Array.isArray(msg.content)) {
                 for (const part of msg.content) {
                     if (part.type === 'text') {
-                        totalChars += part.text.length;
+                        totalChars += (part.text || '').length;
                     } else if (part.type === 'tool-call') {
-                        totalChars += JSON.stringify(part.args).length;
+                        totalChars += JSON.stringify(part.args ?? {}).length;
                     } else if (part.type === 'tool-result') {
-                        totalChars += JSON.stringify(part.result).length;
+                        totalChars += JSON.stringify(part.result ?? {}).length;
                     }
                 }
             }
@@ -453,6 +453,7 @@ export class Agent {
 
         } catch (error) {
             yield {type: 'error', error: String(error)};
+            console.log("Agent run got error", error);
         }
     }
 
