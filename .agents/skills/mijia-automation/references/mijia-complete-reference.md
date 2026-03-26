@@ -53,10 +53,12 @@
 | cfg.pos | object | 位置信息 `{x, y, width, height}` |
 | props | object | **必须存在**（可以为空对象 `{}`），缺少会报 "Invalid props" |
 | inputs | object | 不能为 null |
-| outputs | object | 不能为 null |
+| outputs | object | 不能为 null，**必须声明输出端口**（如 `{"output": []}`） |
 
 **⚠️ cfg.simplified 字段已废弃，不要添加。**
-**⚠️ props 字段必须存在，即使没有属性也要写 `"props": {}`。**
+**⚠️ props 字段必须存在，即使没有属性也要写 `"props": {}`。** ✅ 已验证
+**⚠️ outputs 的值必须是数组 `[]`，不能是 `null`。** ✅ 已验证
+**⚠️ 所有节点必须声明 outputs 端口，即使没有输出连接。** ✅ 已验证
 
 ### outputs 连接格式
 
@@ -71,6 +73,39 @@
 - ❌ `"output": [["node2", "trigger"]]` — 网关校验：`r.split(".").length` 必须等于 2
 - ❌ `"output": ["node2"]` — 必须包含 `.` 分隔符
 - 空连接：`"output": []`
+- 多个目标：`"output": ["cond2.condition", "cond3.condition"]`（一个 output 连多个下游）
+
+### inputs 端口声明机制
+
+`"inputs": {"trigger": null}` 中的 `null` **不是"未连接"**，而是**声明端口存在**。信号由上游节点的 `outputs` 数组传来。
+
+```
+上游 node 的 outputs ──→ 下游 node 的 inputs
+"output": ["cond1.trigger"]    "inputs": {"trigger": null}  ← 端口声明
+```
+
+**连接关系完全由 outputs 数组决定**。inputs 只声明"我有哪些端口"。生成规则后必须逐个检查每个节点的 outputs 数组，确保：
+1. 引用的目标节点 ID 存在
+2. 引用的端口名是目标节点 inputs 中声明的端口名
+3. 点分隔格式正确：`"目标节点ID.目标端口名"`
+
+### ⚠️ 网关不检查连接完整性（已验证）
+
+网关 `setGraph` **只校验节点级别结构**（字段类型、必填字段），**不校验连接级别的逻辑完整性**。以下错误都能通过网关校验但在运行时不工作：
+- condition 的 condition 端口未连接 → 通过校验，但条件永远满足（默认为 true）
+- deviceGet.output2 连到 state 节点 → 通过校验，但语义错误
+- 任何节点的 output 连到 timeRange → 通过校验，但 timeRange 没有输入端口
+
+**因此，生成规则后必须自行验证连接完整性**，不能依赖网关报错。
+
+### state 节点 vs event 节点
+
+| 类型 | 特征 | inputs | 代表节点 |
+|------|------|--------|----------|
+| **event 节点** | 可被触发执行 | 有 trigger 或 input 端口 | deviceOutput, condition, delay, deviceGet |
+| **state 节点** | 不能被触发，只提供状态值 | `inputs: {}`（空） | timeRange, alarmClock, deviceInputSetVar, varChange, onLoad |
+
+**state 节点的 outputs 只能连到 event 节点的 `condition` 类端口（如 condition.condition），不能作为触发链的一环。**
 
 ### 已知全部节点类型
 
@@ -584,8 +619,10 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
 - `output`：查询结果满足条件时触发
 - `output2`：查询结果不满足条件时触发
 
-**⚠️ deviceGet 的 outputs 必须同时有 `output` 和 `output2`**。
-**⚠️ inputs 必须使用 `"input": null`，不能用 `"trigger": null`**。
+**⚠️ deviceGet 的 outputs 必须同时有 `output` 和 `output2`**。✅ 已验证
+**⚠️ inputs 必须使用 `"input": null`，不能用 `"trigger": null`**。✅ 已验证
+**⚠️ `output` 和 `output2` 都应连接到 event 节点的 trigger 端口**（如 condition.trigger, deviceOutput.trigger）
+**❌ 禁止**将 output2 连到 state 节点（如 timeRange），state 节点不能被触发
 
 ---
 
@@ -598,7 +635,7 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
   "id": "timer1",
   "type": "alarmClock",
   "cfg": {
-    "name": "deviceInput",
+    "name": "alarmClock",
     "version": 1,
     "happenType": "now",
     "tempOffset": 0,
@@ -672,13 +709,42 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
 - `start`/`end` 的 `hour`/`minute`/`second` 范围同 `alarmClock`
 - `filter.day`：整数数组，0=周日, 1=周一, ..., 6=周六
 
-**⚠️ timeRange 特殊规则**：
-- `inputs` 必须是空对象 `{}`（不能有 `trigger`）
-- `outputs` 只有 `output`（没有 `output2`）
+**⚠️ timeRange 关键规则（已验证）**：
+- `inputs` 必须是空对象 `{}`（不能有 `trigger`）✅ 已验证
+- `outputs` 只有 `output`（没有 `output2`）✅ 已验证
 - 它是**状态节点**，不是事件驱动节点
-- 正确用法：timeRange.output → condition.condition（作为条件判断）
-- ❌ 错误：`query.output2 → range1.trigger`（timeRange 没有 trigger 输入）
-- ❌ 错误：`range1.output2`（timeRange 只有 output，没有 output2）
+- `outputs.output` **只能连接到 condition.condition** ✅ 已验证
+- `outputs.output` 数组可包含**多个目标**（同一个 timeRange 连到多个 condition）
+- ❌ **禁止**任何节点的 output 连到 timeRange（timeRange 没有输入端口）
+- ❌ **禁止**使用 `output2`（timeRange 只有 `output`，没有 `output2`）
+
+**多分支用法**：当多个 branch 都需要判断时间段时，同一个 timeRange 的 output 数组可以包含多个目标：
+```json
+{"id":"range1","type":"timeRange","cfg":{"name":"timeRange","version":1},"props":{"start":{"hour":1,"minute":30,"second":0},"end":{"hour":9,"minute":0,"second":0},"filter":{"day":[0,1,2,3,4,5,6]}},"inputs":{},"outputs":{"output":["cond2.condition","cond3.condition"]}}
+```
+
+**常见错误示例**：
+
+```
+❌ 错误：query.output2 → range1.output
+   "outputs": {"output2": ["range1.output"]}
+   问题：range1.output 不是输入端口，这是语法错误
+
+❌ 错误：cond2 没有 condition 来源
+   query1.output → cond2.trigger     ✅ trigger 有了
+   (cond2.condition 没有任何连接)     ❌ condition 没有！
+   结果：cond2 条件永远满足（默认为 true），等于没有条件判断
+
+✅ 正确：
+   "query1": {"outputs": {"output": ["cond2.trigger"], "output2": ["cond3.trigger"]}}
+   "range1": {"outputs": {"output": ["cond2.condition", "cond3.condition"]}}
+```
+
+**生成 timeRange 规则后必须检查**：
+- [ ] timeRange 的 `inputs: {}`（空对象）
+- [ ] timeRange.outputs.output 中所有目标都是 `xxx.condition` 格式
+- [ ] 每个需要判断时间的 condition，其 `inputs.condition` 都被 state 节点的 output 连接
+- [ ] 没有任何节点的 output 连到了 timeRange
 
 ---
 
@@ -689,21 +755,25 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
   "id": "delay1",
   "type": "delay",
   "cfg": {
-    "name": "deviceInput",
+    "name": "delay",
     "version": 1,
     "unit": "s",
     "value": 5,
     "pos": {...}
   },
-  "props": {"timeout": 5000},
-  "inputs": {"trigger": null},
-  "outputs": {"output": ["nextNode.trigger"]}
+      "props": {"timeout": 5000},
+      "inputs": {"input": null},
+      "outputs": {"output": ["nextNode.trigger"]}
 }
 ```
 
 - `props.timeout`：毫秒（网关实际执行用这个值）
 - `cfg.unit`：`"ms"` / `"s"` / `"min"` / `"hour"`（UI 显示用）
 - `cfg.value`：数值（UI 显示用）
+
+⚠️ **delay 关键规则（已验证）**：
+- `inputs` 必须是 `{"input": null}`（用 input，不是 trigger）✅ 已验证
+- `props.timeout` 必须是整数毫秒，不能是小数
 
 ---
 
@@ -777,12 +847,21 @@ MIOT Spec 使用的 format 值与网关要求的 dtype 不同，需要转换：
 2. 如果 `condition` 为 `true`（或 `null` 且条件满足），触发 `met`
 3. 否则触发 `unmet`
 
+**⚠️ condition 关键规则**：
+- **`trigger` 和 `condition` 必须都有信号来源**，缺一不可
+- `trigger` = "当"：由 event 节点的 outputs 触发（如 `deviceInput.output`, `deviceGet.output`）
+- `condition` = "如果"：由 state 节点的 outputs 提供条件值（如 `timeRange.output`, `logicAnd.output`）
+- ❌ 如果 `condition` 未连接 → 网关默认为 true，条件永远满足，等于没有条件判断
+- ❌ 如果 `trigger` 未连接 → 节点永远不会被触发
+
 **与 deviceGet 配合**：
 ```json
 // deviceGet 的 output 触发 condition
 "query1.outputs.output": ["cond1.trigger"]
-// deviceGet 的 output2 也可以连接到 condition.condition
-"query1.outputs.output2": ["cond1.condition"]
+// deviceGet 的 output2 连到另一个 condition
+"query1.outputs.output2": ["cond2.trigger"]
+// timeRange 同时连到两个 condition 的 condition 端口
+"range1.outputs.output": ["cond1.condition", "cond2.condition"]
 ```
 
 **与 timeRange 配合（常见模式）**：
@@ -821,6 +900,10 @@ deviceInput → condition1
 - `props.interval`：整数，毫秒
 - `start` 触发时开始循环，每个 interval 触发一次 output
 - `stop` 触发时停止循环
+
+⚠️ **loop 关键规则（已验证）**：
+- `inputs` 是 `{start: null, stop: null}`，**不是** `{input: null}` ✅ 已验证
+- ❌ `{input: null}` 会报错 "No start"
 
 ---
 
@@ -999,7 +1082,6 @@ deviceInput → condition1
     "name": "deviceInput",
     "version": 1,
     "pos": {"x": 100, "y": 100, "width": 528, "height": 200},
-    "name": "备注标题",
     "contents": "这是备注内容",
     "background": "blue"
   },

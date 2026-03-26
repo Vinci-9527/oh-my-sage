@@ -9,6 +9,7 @@ import { GatewayClient } from '../gateway/client';
 import { Device } from '../../shared/types';
 import { ModelConfig, getModelConfigFromEnv } from './model';
 import { getSkillByName, formatSkillContent, readSkillFile, getSkillCatalog } from '../skills/loader';
+import { validateGraph } from '../validator/graph-validator';
 
 /**
  * 节点自动布局
@@ -411,7 +412,19 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
               },
             },
           };
-          
+
+          // 校验连接完整性
+          const errors = validateGraph(graph);
+          const errorList = errors.filter(e => e.level === 'error');
+          if (errorList.length > 0) {
+            return {
+              success: false,
+              valid: false,
+              errors: errorList.map(e => ({ node: e.nodeId, type: e.type, message: e.message })),
+              error: `规则校验失败（${errorList.length} 个错误），请修复后重试`,
+            };
+          }
+
           await gatewayClient.callApi('setGraph', graph, 10000);
           
           return {
@@ -481,6 +494,20 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
               },
             },
           };
+
+          // 校验连接完整性（仅当提供新节点时校验）
+          if (nodes) {
+            const errors = validateGraph(graph);
+            const errorList = errors.filter(e => e.level === 'error');
+            if (errorList.length > 0) {
+              return {
+                success: false,
+                valid: false,
+                errors: errorList.map(e => ({ node: e.nodeId, type: e.type, message: e.message })),
+                error: `规则校验失败（${errorList.length} 个错误），请修复后重试`,
+              };
+            }
+          }
 
           await gatewayClient.callApi('setGraph', graph, 10000);
 
@@ -677,6 +704,55 @@ export function createTools(gatewayClient: GatewayClient, modelConfig?: ModelCon
           skillName,
           filePath,
           content,
+        };
+      },
+    }),
+
+    // ==================== 校验工具 ====================
+
+    /**
+     * 校验规则连接完整性
+     * 在调用 create_graph / update_graph 之前必须先调用此工具
+     * 将完整的 graph JSON 传入（包含 nodes 和 cfg），返回校验结果
+     */
+    'validate_graph': tool({
+      description: '校验规则连接完整性。创建或更新规则前必须先调用此工具。传入完整的 graph JSON（含 nodes 和 cfg），返回错误列表。如果有 error 级别的问题，必须修复后再创建。',
+      parameters: z.object({
+        nodes: z.array(z.any()).describe('节点列表'),
+        cfg: z.object({
+          id: z.string(),
+          enable: z.boolean(),
+          uiType: z.string(),
+          userData: z.object({
+            name: z.string(),
+            lastUpdateTime: z.number(),
+            transform: z.object({ x: z.number(), y: z.number(), scale: z.number(), rotate: z.number() }),
+          }),
+        }).describe('规则配置'),
+      }),
+      execute: async ({ nodes, cfg }) => {
+        const graph = { id: cfg.id, nodes, cfg };
+        const errors = validateGraph(graph as any);
+
+        if (errors.length === 0) {
+          return { success: true, valid: true, message: '规则校验通过' };
+        }
+
+        const errorList = errors
+          .filter(e => e.level === 'error')
+          .map(e => ({ node: e.nodeId, type: e.type, message: e.message }));
+        const warnList = errors
+          .filter(e => e.level === 'warn')
+          .map(e => ({ node: e.nodeId, type: e.type, message: e.message }));
+
+        return {
+          success: true,
+          valid: errorList.length === 0,
+          errors: errorList,
+          warnings: warnList,
+          message: errorList.length > 0
+            ? `发现 ${errorList.length} 个错误，必须修复后才能创建规则`
+            : `校验通过（${warnList.length} 个警告）`,
         };
       },
     }),

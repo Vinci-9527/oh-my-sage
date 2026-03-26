@@ -145,8 +145,9 @@ Agent: [思考中...] 我来帮你设置这个自动化。
 | `get_device` | 获取设备详情+MIOT Spec能力（支持批量 dids） |
 | `get_graphs` | 获取自动化规则列表 |
 | `get_graph` | 获取指定规则的详细信息 |
-| `create_graph` | 创建新的自动化规则 |
-| `update_graph` | 更新现有规则 |
+| `create_graph` | 创建新的自动化规则（内置连接校验） |
+| `update_graph` | 更新现有规则（内置连接校验） |
+| `validate_graph` | 校验规则连接完整性（创建前校验） |
 | `delete_graph` | 删除规则 |
 | `toggle_graph` | 启用/禁用规则 |
 | `get_variables` | 获取变量列表 |
@@ -192,6 +193,8 @@ oh-my-sage/
 │   │   │   └── store.ts     # 会话存储
 │   │   └── skills/
 │   │       └── loader.ts    # 技能加载器
+│   │   └── validator/
+│   │       └── graph-validator.ts  # 规则连接校验器
 │   └── shared/
 │       ├── types.ts         # 类型定义
 │       └── constants.ts     # 常量定义
