@@ -17,7 +17,7 @@ export const runtime = 'nodejs';
 export async function POST(request: NextRequest) {
     try {
         const body = await request.json();
-        const {message, modelConfig, sessionId} = body;
+        const {message, sessionId} = body;
 
         if (!message) {
             return new Response(
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
         // 使用已建立的连接
         const gateway = getGateway()!;
-        const config = modelConfig || getModelConfigFromEnv();
+        const config = getModelConfigFromEnv();
         const agent = new Agent(gateway, config);
 
         // 如果有 sessionId，加载历史
