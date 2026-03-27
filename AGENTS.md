@@ -25,9 +25,12 @@ TypeScript checking: `npx tsc --noEmit` (strict mode is enabled in tsconfig.json
 ```
 src/
 ├── app/                    # Next.js App Router pages & API routes
-│   ├── api/chat/route.ts   # POST /api/chat - streaming agent endpoint
-│   ├── api/devices/route.ts
-│   ├── api/graphs/route.ts
+│   ├── api/
+│   │   ├── auth/route.ts   # POST /api/auth - gateway login
+│   │   ├── chat/route.ts   # POST /api/chat - streaming agent endpoint
+│   │   ├── devices/route.ts
+│   │   ├── graphs/route.ts
+│   │   └── sessions/       # Session CRUD + message history
 │   ├── page.tsx            # Main page
 │   └── layout.tsx          # Root layout with Ant Design config
 ├── components/             # React UI components (Chat, DevicePanel, etc.)
@@ -39,15 +42,31 @@ src/
 │   ├── agent/              # Agent core
 │   │   ├── agent.ts        # Agent class with async generator run loop
 │   │   └── suggestions.ts  # Suggestion generation
-│   └── gateway/            # Xiaomi gateway WebSocket client
-│       ├── client.ts       # GatewayClient class
-│       └── shared.ts       # Shared gateway singleton
+│   ├── gateway/            # Xiaomi gateway WebSocket client
+│   │   ├── client.ts       # GatewayClient class (ECJPAKE handshake, AES-GCM)
+│   │   └── shared.ts       # Shared gateway singleton
+│   ├── session/
+│   │   └── store.ts        # JSON file-based session/message persistence
+│   ├── skills/
+│   │   └── loader.ts       # Dynamic skill loader (progressive disclosure)
+│   └── validator/
+│       └── graph-validator.ts  # Graph node/connection validation
 ├── shared/
 │   ├── types.ts            # Shared TypeScript interfaces
-│   └── constants.ts        # Constants (node types, operators, URNs)
+│   └── constants.ts        # Constants (data types, URNs)
 ```
 
 Path alias: `@/*` maps to `./src/*` (configured in tsconfig.json).
+
+## Skills System
+
+The project uses a progressive disclosure skill system. Skills live in `.agents/skills/` as directories containing `SKILL.md` files.
+
+- **Layer 1 (Catalog)**: Skill name + description injected into system prompt (~50 tokens each)
+- **Layer 2 (Instructions)**: Full SKILL.md body loaded via `activate_skill` tool
+- **Layer 3 (Resources)**: Files in `references/`, `scripts/`, `assets/` loaded via `read_skill_file` tool
+
+When creating a new skill, follow the structure in existing `.agents/skills/` directories.
 
 ## Code Style Guidelines
 
@@ -98,6 +117,11 @@ import { Device } from '../../shared/types';
 - Agent uses async generators (`async *run()`) for streaming output
 - Use `for await (const chunk of stream)` for iteration
 
+### API Routes
+- All API routes use Node.js runtime: `export const runtime = 'nodejs'`
+- Streaming responses use `ReadableStream` with SSE format (`data: ...\n\n`)
+- End with `data: [DONE]\n\n` for stream completion
+
 ### Comments
 - Chinese comments are used throughout the codebase - this is fine, match existing style
 - JSDoc blocks on exported classes, interfaces, and key functions
@@ -113,3 +137,11 @@ import { Device } from '../../shared/types';
 - Copy `.env.example` to `.env` for local development
 - Config is loaded from env vars via `getModelConfigFromEnv()` in `model.ts`
 - Gateway URL defaults to `http://192.168.0.5`
+- Supports any OpenAI-compatible API (configure via `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`)
+
+### State Management
+- No global state library (no Redux, no Zustand on the server)
+- Gateway is a shared singleton via `server/gateway/shared.ts` (`getGateway()`, `isGatewayConnected()`)
+- Session persistence uses JSON file-based store (`server/session/store.ts`)
+- Client state uses React `useState`/`useRef` hooks with prop drilling (no context providers)
+- Zustand is available as a dependency but used sparingly - check before adding new stores
