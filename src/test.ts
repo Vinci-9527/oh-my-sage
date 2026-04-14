@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {streamText} from 'ai';
 import {createOpenAI} from '@ai-sdk/openai';
 
 import {createTools} from './server/ai/tools';
+import {clearSkillsCache, loadSkills} from './server/skills/loader';
 
 async function captureToolSchemas() {
     let requestBody: any = null;
@@ -49,6 +53,44 @@ async function captureToolSchemas() {
     return requestBody.tools;
 }
 
+function testSkillLoaderWithCrlfFrontmatter() {
+    const originalCwd = process.cwd();
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oh-my-sage-skill-test-'));
+
+    try {
+        const skillDir = path.join(tempDir, '.agents', 'skills', 'mijia-automation');
+        fs.mkdirSync(skillDir, {recursive: true});
+        fs.writeFileSync(
+            path.join(skillDir, 'SKILL.md'),
+            [
+                '---',
+                'name: mijia-automation',
+                'description: test skill',
+                '---',
+                '',
+                '# Test Skill',
+                '',
+                'body',
+            ].join('\r\n'),
+            'utf8'
+        );
+
+        process.chdir(tempDir);
+        clearSkillsCache();
+
+        const skills = loadSkills();
+        const skill = skills.find(item => item.name === 'mijia-automation');
+
+        assert.ok(skill, 'CRLF frontmatter skill should be loaded');
+        assert.equal(skill?.description, 'test skill');
+        assert.equal(skill?.content, '# Test Skill\r\n\r\nbody');
+    } finally {
+        process.chdir(originalCwd);
+        clearSkillsCache();
+        fs.rmSync(tempDir, {recursive: true, force: true});
+    }
+}
+
 async function main() {
     const tools = await captureToolSchemas();
 
@@ -78,6 +120,8 @@ async function main() {
         assert.ok(schema, `${toolName} should include parameters schema`);
         scanArrays(schema, toolName);
     }
+
+    testSkillLoaderWithCrlfFrontmatter();
 
     console.log('Tool schema test passed');
 }
