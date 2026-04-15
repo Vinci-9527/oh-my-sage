@@ -75,7 +75,7 @@ export default function GraphPanel({
                                        onDelete,
                                    }: GraphPanelProps) {
     return (
-        <div style={{height: '100%', display: 'flex', flexDirection: 'column'}}>
+        <div style={{height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column'}}>
             {/* 头部 */}
             <div style={{padding: '12px 0', borderBottom: '1px solid #f0f0f0'}}>
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center'}}>
@@ -98,7 +98,7 @@ export default function GraphPanel({
             </div>
 
             {/* Graph 列表 */}
-            <div style={{flex: 1, overflow: 'auto'}}>
+            <div style={{flex: 1, minHeight: 0, overflow: 'auto'}}>
                 {loading ? (
                     <div style={{textAlign: 'center', padding: 40}}>
                         <Spin/>

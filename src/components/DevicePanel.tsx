@@ -114,7 +114,7 @@ export default function DevicePanel({
     }
 
     return (
-        <div style={{height: '100%', display: 'flex', flexDirection: 'column'}}>
+        <div style={{height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column'}}>
             {/* 头部 */}
             <div style={{padding: '16px', borderBottom: '1px solid #f0f0f0'}}>
                 <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12}}>
@@ -147,7 +147,7 @@ export default function DevicePanel({
             </div>
 
             {/* 设备列表 */}
-            <div style={{flex: 1, overflow: 'auto', padding: '0 16px'}}>
+            <div style={{flex: 1, minHeight: 0, overflow: 'auto', padding: '0 16px'}}>
                 {propLoading ? (
                     <div style={{textAlign: 'center', padding: 40}}>
                         <Spin indicator={<LoadingOutlined style={{fontSize: 24}} spin/>}/>
