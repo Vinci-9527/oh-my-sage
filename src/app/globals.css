@@ -475,6 +475,89 @@ a:hover {
     line-height: 56px !important;
 }
 
+.app-shell {
+    height: 100vh;
+    overflow: hidden;
+}
+
+.app-body {
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.app-sider {
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.app-sider .ant-layout-sider-children {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sidebar-tabs.ant-tabs {
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.sidebar-tabs .ant-tabs-nav {
+    flex: 0 0 auto;
+    margin: 0 !important;
+}
+
+.sidebar-tabs .ant-tabs-content-holder {
+    flex: 1;
+    min-height: 0;
+}
+
+.sidebar-tabs .ant-tabs-content {
+    height: 100%;
+}
+
+.sidebar-tabs .ant-tabs-tabpane {
+    height: 100%;
+}
+
+.sidebar-tabs .ant-tabs-tabpane-active {
+    display: flex;
+    min-height: 0;
+}
+
+.sidebar-tabs .ant-tabs-tabpane-active > * {
+    flex: 1;
+    min-height: 0;
+}
+
+.app-content {
+    display: flex;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.app-main-grid {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+}
+
+.app-main-grid > * {
+    min-height: 0;
+}
+
+.app-chat-panel {
+    min-height: 0;
+}
+
+.app-session-panel {
+    min-height: 0;
+}
+
 /* Sider 折叠按钮暗色 */
 .ant-layout-sider-trigger {
     background: rgba(255, 255, 255, 0.04) !important;

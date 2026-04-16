@@ -51,7 +51,7 @@ export default function SessionPanel({
                                          onSelectSession, onDeleteSession, onNewSession, onRefresh,
                                      }: SessionPanelProps) {
     return (
-        <div style={{height: '100%', display: 'flex', flexDirection: 'column'}}>
+        <div style={{height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column'}}>
             {/* 头部 */}
             <div style={{
                 padding: '16px 16px 12px',
@@ -90,7 +90,7 @@ export default function SessionPanel({
             </div>
 
             {/* Session 列表 */}
-            <div style={{flex: 1, overflow: 'auto', padding: '8px'}}>
+            <div style={{flex: 1, minHeight: 0, overflow: 'auto', padding: '8px'}}>
                 {loading ? (
                     <div style={{textAlign: 'center', padding: 40}}>
                         <Spin indicator={<SyncOutlined style={{fontSize: 20, color: '#818cf8'}} spin/>}/>

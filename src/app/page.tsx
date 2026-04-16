@@ -215,7 +215,7 @@ export default function HomePage() {
     }
 
     return (
-        <Layout style={{minHeight: '100vh', background: 'var(--bg-deep)'}}>
+        <Layout className="app-shell" style={{background: 'var(--bg-deep)'}}>
             {/* 顶栏 */}
             <Header style={{
                 padding: '0 24px',
@@ -260,9 +260,10 @@ export default function HomePage() {
                 </Space>
             </Header>
 
-            <Layout>
+            <Layout className="app-body">
                 {/* 左侧边栏 */}
                 <Sider
+                    className="app-sider"
                     width={300}
                     collapsible
                     collapsed={collapsed}
@@ -275,6 +276,7 @@ export default function HomePage() {
                 >
                     {!collapsed ? (
                         <Tabs
+                            className="sidebar-tabs"
                             defaultActiveKey="devices"
                             onChange={handleTabChange}
                             centered
@@ -315,15 +317,11 @@ export default function HomePage() {
                 </Sider>
 
                 {/* 主内容区 */}
-                <Content style={{padding: 16, background: 'var(--bg-deep)'}}>
-                    <div style={{
-                        display: 'flex',
-                        gap: 12,
-                        height: 'calc(100vh - 56px - 32px)',
-                    }}>
+                <Content className="app-content" style={{padding: 16, background: 'var(--bg-deep)'}}>
+                    <div className="app-main-grid" style={{display: 'flex', gap: 12}}>
                         {/* 聊天区 */}
                         <div
-                            className="glass-panel"
+                            className="glass-panel app-chat-panel"
                             style={{
                                 flex: 1,
                                 borderRadius: 'var(--radius-lg)',
@@ -343,7 +341,7 @@ export default function HomePage() {
 
                         {/* Session 面板 */}
                         <div
-                            className="glass-panel"
+                            className="glass-panel app-session-panel"
                             style={{
                                 width: 300,
                                 borderRadius: 'var(--radius-lg)',
