@@ -2,146 +2,130 @@
 
 ## Project Overview
 
-oh-my-sage (智者) is a Xiaomi Mijia smart home AI Agent built with Next.js 14 + TypeScript + Ant Design + Vercel AI SDK. It communicates with a Xiaomi gateway via WebSocket+ECJPAKE and uses LLM tool-calling to drive an agent loop for smart home automation.
+Xiaomi Mijia smart home AI Agent with dual-mode architecture:
+- **Web Mode**: Next.js 14 + TypeScript + Ant Design + Vercel AI SDK
+- **MCP Mode**: Model Context Protocol server for AI coding assistants
 
-## Build, Lint, and Test Commands
+Communicates with Xiaomi gateway via WebSocket+ECJPAKE. Uses LLM tool-calling for smart home automation.
+
+## Key Commands
 
 ```bash
-npm run dev          # Start Next.js dev server
-npm run build        # Production build (next build)
-npm run start        # Start production server
-npm run lint         # ESLint (next lint, uses next/core-web-vitals)
-npm run test         # Run test script (npx tsx src/test.ts) - manual test, not automated test suite
+# Web development
+npm run dev              # Start Next.js dev server
+npm run build            # Production build
+
+# MCP development  
+npm run build:mcp        # Build MCP server only
+npm link                 # Link oh-my-sage-mcp command globally
+
+# Quality checks
+npm run lint             # ESLint (next/core-web-vitals)
+npx tsc --noEmit         # TypeScript strict mode check
+
+# Testing (manual only, no automated framework)
+npm run test             # Runs npx tsx src/test.ts
+npx tsx <script.ts>      # Run single TypeScript file
 ```
 
-There is **no automated test framework** (no Jest, Vitest, etc.). `npm run test` runs a manual integration test via `tsx`. There are no unit tests. If you add tests, use `tsx` to run them.
+**Note**: No Jest/Vitest. All tests are manual integration tests via `tsx`.
 
-Single test / single script: `npx tsx <path-to-script.ts>`
+## Dual Architecture
 
-TypeScript checking: `npx tsc --noEmit` (strict mode is enabled in tsconfig.json).
+### Web Mode (`src/`)
+- `src/app/` - Next.js App Router, API routes, pages
+- `src/components/` - React UI (Chat, DevicePanel, etc.)
+- `src/server/` - Backend: AI/LLM integration, Agent core, Gateway client, Session store
+- `src/shared/` - Types and constants
 
-## Project Structure
+### MCP Mode (`src/core/` + `src/mcp/`)
+- `src/core/` - Shared Core library (tools, gateway, types)
+- `src/mcp/` - MCP Server implementation
+- `dist/mcp/` - Build output for MCP
 
-```
-src/
-├── app/                    # Next.js App Router pages & API routes
-│   ├── api/
-│   │   ├── auth/route.ts   # POST /api/auth - gateway login
-│   │   ├── chat/route.ts   # POST /api/chat - streaming agent endpoint
-│   │   ├── devices/route.ts
-│   │   ├── graphs/route.ts
-│   │   └── sessions/       # Session CRUD + message history
-│   ├── page.tsx            # Main page
-│   └── layout.tsx          # Root layout with Ant Design config
-├── components/             # React UI components (Chat, DevicePanel, etc.)
-├── server/
-│   ├── ai/                 # AI/LLM integration
-│   │   ├── model.ts        # Model config, provider selection (Vercel AI SDK)
-│   │   ├── tools.ts        # Agent tool definitions (zod schemas)
-│   │   └── prompts.ts      # System prompt
-│   ├── agent/              # Agent core
-│   │   ├── agent.ts        # Agent class with async generator run loop
-│   │   └── suggestions.ts  # Suggestion generation
-│   ├── gateway/            # Xiaomi gateway WebSocket client
-│   │   ├── client.ts       # GatewayClient class (ECJPAKE handshake, AES-GCM)
-│   │   └── shared.ts       # Shared gateway singleton
-│   ├── session/
-│   │   └── store.ts        # JSON file-based session/message persistence
-│   ├── skills/
-│   │   └── loader.ts       # Dynamic skill loader (progressive disclosure)
-│   └── validator/
-│       └── graph-validator.ts  # Graph node/connection validation
-├── shared/
-│   ├── types.ts            # Shared TypeScript interfaces
-│   └── constants.ts        # Constants (data types, URNs)
+## MCP Development
+
+**Building**: `npm run build:mcp` outputs to `dist/mcp/mcp/index.js`
+
+**Global command**: `npm link` creates `oh-my-sage-mcp` in PATH
+
+**Local testing**: `oh-my-sage-mcp` (stdio mode)
+
+**Configuration** (for OpenCode/Claude/Cursor):
+```json
+{
+  "mcpServers": {
+    "oh-my-sage": {
+      "command": "npx",
+      "args": ["-y", "oh-my-sage-mcp"]
+    }
+  }
+}
 ```
 
-Path alias: `@/*` maps to `./src/*` (configured in tsconfig.json).
+## Skill System
 
-## Skills System
+Progressive disclosure in `.agents/skills/`:
+- Layer 1: Catalog (name + description, ~50 tokens)
+- Layer 2: Instructions (full SKILL.md via `activate_skill` tool)  
+- Layer 3: Resources (files in `references/` via `read_skill_file` tool)
 
-The project uses a progressive disclosure skill system. Skills live in `.agents/skills/` as directories containing `SKILL.md` files.
+**Critical skill**: `mijia-automation` - Required for creating automation rules via MCP. Located at `.agents/skills/mijia-automation/SKILL.md`.
 
-- **Layer 1 (Catalog)**: Skill name + description injected into system prompt (~50 tokens each)
-- **Layer 2 (Instructions)**: Full SKILL.md body loaded via `activate_skill` tool
-- **Layer 3 (Resources)**: Files in `references/`, `scripts/`, `assets/` loaded via `read_skill_file` tool
-
-When creating a new skill, follow the structure in existing `.agents/skills/` directories.
-
-## Code Style Guidelines
+## Code Conventions
 
 ### Imports
-- Use ES module `import`/`export` for all files
-- External libs first, then internal modules, separated by blank line
-- Use `@/` path alias for cross-module imports (e.g., `import { Agent } from '@/server/agent/agent'`)
-- Within the same directory, use relative paths
-
 ```typescript
-// Good
-import { streamText, CoreMessage } from 'ai';
+// External libs first, then internal
+import { streamText } from 'ai';
 import { z } from 'zod';
 import { GatewayClient } from '../gateway/client';
-import { Device } from '../../shared/types';
+import { Device } from '@/shared/types';  // Use @/ alias for cross-module
 ```
 
 ### TypeScript
-- **Strict mode** is enabled - handle nulls and undefined explicitly
-- Use explicit return types on exported functions
-- Prefer `interface` over `type` for object shapes (project convention in `shared/types.ts`)
-- Use `as const` for constant objects (see `shared/constants.ts`)
-- Use union types for discriminated outputs (e.g., `AgentOutput`)
-- `any` is used pragmatically for gateway API responses and dynamic tool args - this is acceptable in this codebase
+- Strict mode enabled - handle nulls explicitly
+- Prefer `interface` over `type` for objects
+- Explicit return types on exported functions
+- `any` acceptable for gateway API responses (pragmatic)
 
-### Naming Conventions
-- **Files**: camelCase for utilities (`model.ts`, `tools.ts`), kebab-case for components (`Chat.tsx`)
-- **Interfaces**: PascalCase (`Device`, `ModelConfig`, `AgentOutput`)
-- **Constants**: UPPER_SNAKE_CASE (`NODE_TYPES`, `DEFAULT_CONFIG`, `BOOLEAN_PROPERTY_URNS`)
-- **Functions/variables**: camelCase (`createModel`, `gatewayClient`, `getModelConfigFromEnv`)
-- **Tool names**: snake_case strings (`'get_devices'`, `'create_graph'`, `'ask_user'`)
-- **Class methods**: camelCase (`run`, `chat`, `getHistory`, `clear`)
-
-### Components
-- All page/component files use `'use client'` directive (Next.js App Router client components)
-- Use inline styles directly in JSX (project convention, no CSS modules or styled-components)
-- Use Ant Design components (`Input`, `Button`, `Space`, `Typography`, `Layout`, etc.)
-- Use `@ant-design/icons` for icons
-
-### Error Handling
-- Wrap gateway API calls in try/catch, return `{ success: false, error: string }` objects
-- Tool execute functions always return `{ success: boolean, ... }` - never throw
-- API routes return proper HTTP status codes with JSON error bodies
-- Use `String(error)` to convert caught errors to strings
-
-### Async Patterns
-- Use `async`/`await` consistently
-- Agent uses async generators (`async *run()`) for streaming output
-- Use `for await (const chunk of stream)` for iteration
+### Tool Definitions (`server/ai/tools.ts` or `mcp/tools/`)
+- Use `zod` schemas with `.describe()` for LLM
+- Tools return `{ success: boolean, ... }` - **never throw**
+- Wrap gateway calls in try/catch, return `{ success: false, error: string }`
 
 ### API Routes
-- All API routes use Node.js runtime: `export const runtime = 'nodejs'`
-- Streaming responses use `ReadableStream` with SSE format (`data: ...\n\n`)
-- End with `data: [DONE]\n\n` for stream completion
+- Use `export const runtime = 'nodejs'`
+- SSE format: `data: ...
 
-### Comments
-- Chinese comments are used throughout the codebase - this is fine, match existing style
-- JSDoc blocks on exported classes, interfaces, and key functions
-- Section dividers with `// ==================== Section Name ====================`
+`, end with `data: [DONE]
 
-### Tool Definitions (server/ai/tools.ts)
-- Use `zod` for parameter schemas with `.describe()` for LLM understanding
-- Use `tool()` from `ai` (Vercel AI SDK) to wrap each tool
-- Each tool has a description string, zod parameters schema, and async execute function
-- Tools return `{ success: boolean, ...data }` or `{ success: false, error: string }`
+`
 
-### Environment & Config
-- Copy `.env.example` to `.env` for local development
-- Config is loaded from env vars via `getModelConfigFromEnv()` in `model.ts`
-- Gateway URL defaults to `http://192.168.0.5`
-- Supports any OpenAI-compatible API (configure via `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`)
+### Naming
+- Files: camelCase for utils, kebab-case for components
+- Interfaces: PascalCase
+- Constants: UPPER_SNAKE_CASE  
+- Tool names: snake_case strings
 
-### State Management
-- No global state library (no Redux, no Zustand on the server)
-- Gateway is a shared singleton via `server/gateway/shared.ts` (`getGateway()`, `isGatewayConnected()`)
-- Session persistence uses JSON file-based store (`server/session/store.ts`)
-- Client state uses React `useState`/`useRef` hooks with prop drilling (no context providers)
-- Zustand is available as a dependency but used sparingly - check before adding new stores
+## State Management
+
+- **No Redux/Zustand on server**
+- Gateway: shared singleton via `server/gateway/shared.ts`
+- Session: JSON file-based store (`server/session/store.ts`)
+- Client: React hooks with prop drilling
+
+## Environment
+
+Copy `.env.example` to `.env`:
+```env
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=your_key
+LLM_MODEL=gpt-4o
+GATEWAY_URL=http://192.168.0.5  # Xiaomi gateway default
+```
+
+## Comments
+
+Chinese comments are used throughout - match existing style.
+Use section dividers: `// ==================== Section Name ====================`

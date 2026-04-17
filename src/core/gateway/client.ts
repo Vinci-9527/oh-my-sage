@@ -1,6 +1,6 @@
 /**
- * oh-my-sage - 网关客户端
- * 封装 gateway_client.js 的功能
+ * Core - Gateway 客户端
+ * 封装 ECJPAKE + AES-GCM + WebSocket 通信
  */
 
 import WebSocket from 'ws';
@@ -8,13 +8,20 @@ import crypto from 'crypto';
 import {deflateRawSync, inflateRawSync} from 'zlib';
 import elliptic from 'elliptic';
 import BN from 'bn.js';
-import {DATA_TYPE} from '../../shared/constants';
-import {DeviceListResponse} from '../../shared/types';
 
 const EC = new elliptic.ec('secp256k1');
 const EC_N: BN = EC.n!;
 
-// ==================== AES-GCM 加密 ====================
+const DATA_TYPE = {
+    PROTOCOL_LIST: 1,
+    SELECTED_PROTOCOL: 2,
+    SESSION_KEY_EXCHANGE: 3,
+    ERROR: 4,
+    DATA: 5,
+    SERVER_PUB_KEY: 16,
+    ECJPAKE_ROUND_ONE: 32,
+    ECJPAKE_ROUND_TWO: 33,
+} as const;
 
 class AESGCMCipher {
     private key: Buffer;
@@ -66,8 +73,6 @@ class AESGCMCipher {
     }
 }
 
-// ==================== 压缩/解压 ====================
-
 function compress(data: Buffer): Buffer {
     const compressed = deflateRawSync(data);
     const result = Buffer.alloc(4 + compressed.length);
@@ -81,18 +86,16 @@ function decompress(data: Buffer): Buffer {
     return inflateRawSync(data.slice(4));
 }
 
-// ==================== ECJPAKE ====================
-
 class ECJPAKE {
     private role: string;
     private peerRole: string;
     private secretBytes: Buffer;
     private x1: BN | null = null;
     private x2: BN | null = null;
-    private g_x1: any = null;
-    private g_x2: any = null;
-    private g_x3: any = null;
-    private g_x4: any = null;
+    private g_x1: unknown = null;
+    private g_x2: unknown = null;
+    private g_x3: unknown = null;
+    private g_x4: unknown = null;
     private roundOneSent = false;
     private roundOneReceived = false;
     private roundTwoSent = false;
@@ -104,25 +107,27 @@ class ECJPAKE {
         this.secretBytes = Buffer.from(secret, 'utf8');
     }
 
-    private encodePoint(point: any): Buffer {
+    private encodePoint(point: unknown): Buffer {
         const result = Buffer.alloc(66);
         result[0] = 65;
         result[1] = 4;
-        Buffer.from(point.getX().toArray('be', 32)).copy(result, 2);
-        Buffer.from(point.getY().toArray('be', 32)).copy(result, 34);
+        const p = point as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>;
+        Buffer.from(p.getX().toArray('be', 32)).copy(result, 2);
+        Buffer.from(p.getY().toArray('be', 32)).copy(result, 34);
         return result;
     }
 
-    private encodePointForHash(point: any): Buffer {
+    private encodePointForHash(point: unknown): Buffer {
         const result = Buffer.alloc(69);
         result.writeUInt32BE(65, 0);
         result[4] = 4;
-        Buffer.from(point.getX().toArray('be', 32)).copy(result, 5);
-        Buffer.from(point.getY().toArray('be', 32)).copy(result, 37);
+        const p = point as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>;
+        Buffer.from(p.getX().toArray('be', 32)).copy(result, 5);
+        Buffer.from(p.getY().toArray('be', 32)).copy(result, 37);
         return result;
     }
 
-    private decodePoint(data: Buffer): any {
+    private decodePoint(data: Buffer): unknown {
         if (data[0] !== 65 || data[1] !== 4) throw new Error('Invalid point format');
         return EC.keyFromPublic({
             x: data.slice(2, 34).toString('hex'),
@@ -130,7 +135,7 @@ class ECJPAKE {
         }).getPublic();
     }
 
-    private zkpHash(g: any, v: any, publicPoint: any, name: string): BN {
+    private zkpHash(g: unknown, v: unknown, publicPoint: unknown, name: string): BN {
         const nameBytes = Buffer.from(name, 'utf8');
         const data = Buffer.concat([
             this.encodePointForHash(g),
@@ -143,21 +148,23 @@ class ECJPAKE {
         return new BN(crypto.createHash('sha256').update(data).digest()).umod(EC_N);
     }
 
-    private generateZKP(g: any, publicPoint: any, privateKey: BN, name: string) {
+    private generateZKP(g: unknown, publicPoint: unknown, privateKey: BN, name: string) {
         let k = new BN(crypto.randomBytes(32)).umod(EC_N);
         if (k.isZero()) k.iaddn(1);
-        const v = g.mul(k);
+        const v = (g as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).mul(k);
         const challenge = this.zkpHash(g, v, publicPoint, name);
         const r = k.sub(challenge.mul(privateKey)).umod(EC_N);
         return {v, r};
     }
 
-    private verifyZKP(g: any, publicPoint: any, v: any, r: BN, name: string): boolean {
+    private verifyZKP(g: unknown, publicPoint: unknown, v: unknown, r: BN, name: string): boolean {
         const challenge = this.zkpHash(g, v, publicPoint, name);
-        return publicPoint.mul(challenge).add(g.mul(r)).eq(v);
+        const p = publicPoint as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>;
+        const gk = g as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>;
+        return p.mul(challenge).add(gk.mul(r)).eq(v as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>);
     }
 
-    private encodeZKP(v: any, r: BN): Buffer {
+    private encodeZKP(v: unknown, r: BN): Buffer {
         const result = Buffer.alloc(99);
         this.encodePoint(v).copy(result, 0);
         result[66] = 32;
@@ -214,7 +221,7 @@ class ECJPAKE {
         if (!this.roundOneSent || !this.roundOneReceived) throw new Error('Round one not completed');
         this.roundTwoSent = true;
 
-        const g_xa = this.g_x1!.add(this.g_x3).add(this.g_x4);
+        const g_xa = (this.g_x1 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).add(this.g_x3 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).add(this.g_x4 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>);
         const random = new BN(crypto.randomBytes(16));
         const y = random.mul(EC_N).add(new BN(this.secretBytes));
         const x2_s = this.x2!.mul(y).umod(EC_N);
@@ -235,7 +242,7 @@ class ECJPAKE {
 
         const offset = this.role === 'client' ? 3 : 0;
 
-        const g_xb = this.g_x1!.add(this.g_x2).add(this.g_x3);
+        const g_xb = (this.g_x1 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).add(this.g_x2 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).add(this.g_x3 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>);
         const g_s_peer = this.decodePoint(data.slice(offset, offset + 66));
         const zkp = this.decodeZKP(data.slice(offset + 66, offset + 165));
 
@@ -245,24 +252,21 @@ class ECJPAKE {
         const random = new BN(crypto.randomBytes(16));
         const y = random.mul(EC_N).add(new BN(this.secretBytes));
         const m = this.x2!.mul(y).umod(EC_N);
-        const v = g_s_peer.add(this.g_x4.mul(m).neg()).mul(this.x2);
+        const v = (g_s_peer as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).add((this.g_x4 as ReturnType<ReturnType<typeof EC.keyFromPublic>['getPublic']>).mul(m).neg()).mul(this.x2!);
 
         return crypto.createHash('sha256').update(Buffer.from(v.getX().toArray('be', 32))).digest();
     }
 }
 
-// ==================== 网关客户端 ====================
-
 export class GatewayClient {
     private ws: WebSocket | null = null;
     private sessionIdCounter = 0;
-    private pendingRequests = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+    private pendingRequests = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
     private cipherOut: AESGCMCipher | null = null;
     private cipherIn: AESGCMCipher | null = null;
     private secureEstablished = false;
     private connected = false;
 
-    /** 解析网关URL */
     private static parseUrl(url: string): string {
         const match = url.match(/^(https?):\/\/([^/:]+)(?::(\d+))?((?:\/.*)?)/);
         if (!match) throw new Error('Invalid URL');
@@ -273,7 +277,6 @@ export class GatewayClient {
         return `${wsProtocol}://${host}:${wsPort}${wsPath}/centrallinkws/`;
     }
 
-    /** 连接网关 */
     async connect(gatewayUrl: string): Promise<void> {
         const url = GatewayClient.parseUrl(gatewayUrl);
 
@@ -295,7 +298,6 @@ export class GatewayClient {
         });
     }
 
-    /** 接收消息 */
     private recv(): Promise<Buffer> {
         return new Promise((resolve, reject) => {
             this.ws!.once('message', resolve);
@@ -303,7 +305,6 @@ export class GatewayClient {
         });
     }
 
-    /** 带超时的接收 */
     private recvTimeout(ms: number): Promise<Buffer> {
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => {
@@ -324,72 +325,52 @@ export class GatewayClient {
         });
     }
 
-    /** 认证 */
     async authenticate(passcode: string): Promise<void> {
         const jpake = new ECJPAKE(passcode, 'client');
 
-        // 等待服务器选择协议
         let response = await this.recv();
         if (response[0] !== DATA_TYPE.SELECTED_PROTOCOL) {
             throw new Error('Protocol selection failed');
         }
-        console.log('[*] Protocol selected');
 
-        // 发送 Round One
         const roundOne = jpake.writeRoundOne();
         await this.ws!.send(Buffer.concat([Buffer.from([DATA_TYPE.ECJPAKE_ROUND_ONE]), roundOne]));
-        console.log('[*] Sent Round One');
 
-        // 接收服务器 Round One
         response = await this.recv();
         if (response[0] !== DATA_TYPE.ECJPAKE_ROUND_ONE) {
             throw new Error(`Unexpected response type: ${response[0]}`);
         }
         jpake.readRoundOne(response.slice(1));
-        console.log('[*] Received server Round One');
 
-        // 发送客户端 Round Two（关键：在收到服务器Round One后立即发送！）
         const roundTwo = jpake.writeRoundTwo();
         await this.ws!.send(Buffer.concat([Buffer.from([DATA_TYPE.ECJPAKE_ROUND_TWO]), roundTwo]));
-        console.log('[*] Sent Round Two');
 
-        // 接收服务器 Round Two
         response = await this.recv();
         if (response[0] !== DATA_TYPE.ECJPAKE_ROUND_TWO) {
             throw new Error(`Unexpected response type: ${response[0]}`);
         }
         const serverRoundTwo = response.slice(1);
-        console.log('[*] Received server Round Two');
 
-        // 计算共享密钥
         const sharedKey = jpake.readRoundTwo(serverRoundTwo);
-        console.log(`[*] Shared key: ${sharedKey.toString('hex').substring(0, 16)}...`);
 
-        // SESSION_KEY_EXCHANGE
         const sharedCipher = new AESGCMCipher(sharedKey.slice(0, 16), sharedKey.slice(16, 24));
         const myKeyNonce = crypto.randomBytes(24);
 
         try {
             response = await this.recvTimeout(3000);
             if (response[0] === DATA_TYPE.SESSION_KEY_EXCHANGE) {
-                console.log('[*] Received server SESSION_KEY_EXCHANGE first');
                 const serverKeyNonce = sharedCipher.decrypt(response.slice(1));
                 const encrypted = sharedCipher.encrypt(myKeyNonce);
                 await this.ws!.send(Buffer.concat([Buffer.from([DATA_TYPE.SESSION_KEY_EXCHANGE]), encrypted]));
-                console.log('[*] Sent client SESSION_KEY_EXCHANGE');
                 this.cipherOut = new AESGCMCipher(myKeyNonce.slice(0, 16), myKeyNonce.slice(16, 24));
                 this.cipherIn = new AESGCMCipher(serverKeyNonce.slice(0, 16), serverKeyNonce.slice(16, 24));
                 this.secureEstablished = true;
             }
         } catch {
-            // 超时，客户端先发送
-            console.log('[*] Server did not send first, trying client first...');
             const encrypted = sharedCipher.encrypt(myKeyNonce);
             await this.ws!.send(Buffer.concat([Buffer.from([DATA_TYPE.SESSION_KEY_EXCHANGE]), encrypted]));
-            console.log('[*] Sent client SESSION_KEY_EXCHANGE');
             response = await this.recv();
             if (response[0] === DATA_TYPE.SESSION_KEY_EXCHANGE) {
-                console.log('[*] Received server SESSION_KEY_EXCHANGE');
                 const serverKeyNonce = sharedCipher.decrypt(response.slice(1));
                 this.cipherOut = new AESGCMCipher(myKeyNonce.slice(0, 16), myKeyNonce.slice(16, 24));
                 this.cipherIn = new AESGCMCipher(serverKeyNonce.slice(0, 16), serverKeyNonce.slice(16, 24));
@@ -401,13 +382,9 @@ export class GatewayClient {
             throw new Error('Session key exchange failed');
         }
 
-        console.log('[*] Secure session established!');
-
-        // 启动接收循环
         this.startReceiveLoop();
     }
 
-    /** 启动接收循环 */
     private startReceiveLoop(): void {
         if (!this.ws) return;
 
@@ -416,7 +393,6 @@ export class GatewayClient {
         });
     }
 
-    /** 处理消息 */
     private handleMessage(data: Buffer): void {
         if (!data || data.length === 0) return;
         if (data[0] !== DATA_TYPE.DATA || !this.secureEstablished) return;
@@ -442,8 +418,7 @@ export class GatewayClient {
         }
     }
 
-    /** 调用 API */
-    async callApi<T = any>(method: string, params: Record<string, any> = {}, timeout: number = 5000): Promise<T> {
+    async callApi<T = unknown>(method: string, params: Record<string, unknown> = {}, timeout: number = 5000): Promise<T> {
         if (!this.secureEstablished) {
             throw new Error('Secure session not established');
         }
@@ -458,7 +433,7 @@ export class GatewayClient {
 
         return new Promise<T>((resolve, reject) => {
             this.pendingRequests.set(requestId, {
-                resolve: resolve as (value: any) => void,
+                resolve: resolve as (value: unknown) => void,
                 reject
             });
 
@@ -479,12 +454,10 @@ export class GatewayClient {
         });
     }
 
-    /** 获取设备列表 */
-    async getDeviceList(): Promise<DeviceListResponse> {
-        return this.callApi<DeviceListResponse>('getDevList', {}, 10000);
+    async getDeviceList(): Promise<unknown> {
+        return this.callApi('getDevList', {}, 10000);
     }
 
-    /** 关闭连接 */
     async close(): Promise<void> {
         if (this.ws) {
             this.ws.close();
@@ -492,7 +465,6 @@ export class GatewayClient {
         }
     }
 
-    /** 是否已连接 */
     isConnected(): boolean {
         return this.connected && this.secureEstablished;
     }

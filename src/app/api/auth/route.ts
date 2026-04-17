@@ -24,7 +24,6 @@ export async function POST(request: NextRequest) {
             }, {status: 400});
         }
 
-        // 登录并建立 WebSocket 连接
         await connectGateway(passcode, gatewayUrl);
 
         return NextResponse.json({

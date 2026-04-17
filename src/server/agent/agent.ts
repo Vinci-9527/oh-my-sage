@@ -5,9 +5,9 @@
 
 import {streamText, generateText, CoreMessage} from 'ai';
 import {createModel, ModelConfig, getModelConfigFromEnv} from '../ai/model';
-import {createTools} from '../ai/tools';
+import {createCoreTools} from '../ai/tools-adapter';
 import {SYSTEM_PROMPT} from '../ai/prompts';
-import {GatewayClient} from '../gateway/client';
+import {GatewayClient} from '@/core';
 import {getSessionStore, ToolCall} from '../session/store';
 import {formatSkillCatalogForPrompt} from '../skills/loader';
 
@@ -45,7 +45,7 @@ export class Agent {
     constructor(gateway: GatewayClient, modelConfig?: ModelConfig) {
         this.gateway = gateway;
         this.modelConfig = modelConfig || getModelConfigFromEnv();
-        this.tools = createTools(gateway, this.modelConfig);
+        this.tools = createCoreTools(gateway);
 
         // 渐进式披露第一层：只添加 skill catalog（name + description）
         const skillsCatalog = formatSkillCatalogForPrompt();

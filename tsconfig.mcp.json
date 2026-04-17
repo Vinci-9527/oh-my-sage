@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "outDir": "./dist/mcp",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "declaration": true,
+    "sourceMap": true,
+    "lib": ["esnext"],
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/core/**/*", "src/mcp/**/*"],
+  "exclude": ["node_modules", "src/app", "src/components", "src/server"]
+}
