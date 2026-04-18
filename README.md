@@ -1,6 +1,6 @@
 # Oh My Sage
 
-> 米家自动化极客版 AI Agent - 用自然语言控制你的智能家居
+> 米家自动化极客版 AI Agent - 用自然语言创建复杂的米家极客版自动化规则
 
 [![Next.js](https://img.shields.io/badge/Next.js-14-black)](https://nextjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-blue)](https://www.typescriptlang.org/)
